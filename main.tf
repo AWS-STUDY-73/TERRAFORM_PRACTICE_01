@@ -85,7 +85,7 @@ resource "aws_security_group" "allow_tls" {
   }
 
   tags = {
-    Name = "allow_tls"
+    Name = "EC2-VPC-ELB_SG"
   }
 }
 
@@ -101,7 +101,7 @@ resource "aws_instance" "web" {
   user_data               = file("userdata.sh")
 
   tags = {
-    Name = "TEST-SERVER"
+    Name = "NEW-TEST-SERVER"
   }
 }
 
@@ -128,6 +128,17 @@ resource "aws_lb" "ALB" {
   }
 }
 
+resource "aws_lb_listener" "ALB_LISTENER" {
+  load_balancer_arn = aws_lb.ALB.arn
+  port              = "80"
+  protocol          = "HTTP"
+
+  default_action {
+    type             = "forward"
+    target_group_arn = aws_lb_target_group.TG.arn
+  }
+}
+
 resource "aws_lb_target_group" "TG" {
   name     = "TG"
   port     = 80
@@ -141,6 +152,40 @@ resource "aws_lb_target_group_attachment" "TGA" {
   port             = 80
 }
 
+# ============= Application Load Balancer ==========================
+# ============= Auto Scaling Group ==========================
 
+resource "aws_launch_configuration" "LC" {
+  name          = "LC"
+  image_id      = "ami-0522ab6e1ddcc7055"
+  instance_type = "t2.micro"
+  key_name      = "ec2-key"
+  security_groups = [aws_security_group.allow_tls.id]
+  user_data = file("userdata.sh")
+}
 
-# =======================================
+resource "aws_autoscaling_group" "ASG" {
+  name                      = "ASG"
+  max_size                  = 2
+  min_size                  = 1
+  desired_capacity          = 1
+  health_check_grace_period = 300
+  health_check_type         = "ELB"
+  launch_configuration      = aws_launch_configuration.LC.name
+  vpc_zone_identifier       = [aws_subnet.pubsub1.id, aws_subnet.pubsub2.id]
+  target_group_arns         = [aws_lb_target_group.TG.arn]
+
+  tag {
+    key                 = "Name"
+    value               = "Launch_By_ASG"
+    propagate_at_launch = true
+  }
+}
+
+# Create a new load balancer attachment
+resource "aws_autoscaling_attachment" "ALB_TO_ASG" {
+  autoscaling_group_name = aws_autoscaling_group.ASG.id
+  elb                    = aws_lb.ALB.id
+}
+
+# ============= Auto Scaling Group ==========================
